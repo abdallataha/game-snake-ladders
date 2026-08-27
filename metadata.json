@@ -1,0 +1,6 @@
+{
+  "name": "Snakes & Ladders Live Arena",
+  "description": "Real-time online multiplayer Snakes and Ladders game with QR code joining, 50-square board, interactive Red/Blue/Green/Yellow card choices connected to hidden round points with a 30s timer, host card reveal controls, customizable scheme editor, end-game winner celebration podium, and comprehensive post-game statistics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
