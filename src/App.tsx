@@ -114,7 +114,7 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         if (data.state) {
-          const state = data.state;
+          const state: RoomState = data.state;
           setRoomState(state);
 
           const currentSavedPlayerId = sessionStorage.getItem('sl_player_id');
@@ -126,18 +126,21 @@ export default function App() {
         }
       }
     } catch {
-      // Ignore network errors in polling fallback
+      // Ignore transient network errors in polling fallback
     }
   }, []);
 
-  // Set up polling fallback whenever in room
+  // Set up polling fallback whenever in room (1s interval for responsive Vercel serverless updates)
   useEffect(() => {
     if (roomId) {
+      // Immediate fetch on mount/room change
+      fetchRoomStateFallback(roomId);
+
       pollIntervalRef.current = setInterval(() => {
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
           fetchRoomStateFallback(roomId);
         }
-      }, 1500);
+      }, 1000);
     }
     return () => {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
@@ -179,16 +182,18 @@ export default function App() {
         }
       };
 
-      ws.onerror = () => {};
+      ws.onerror = () => {
+        // Fallback to HTTP polling silently
+      };
 
       ws.onclose = () => {
         if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = setTimeout(() => {
           connectWebSocket();
-        }, 3000);
+        }, 5000);
       };
     } catch {
-      // fallback to polling
+      // fallback to HTTP polling
     }
   }, [handleServerMessage]);
 
@@ -200,7 +205,7 @@ export default function App() {
     };
   }, [connectWebSocket]);
 
-  // Unified send action (WebSocket primary, HTTP POST fallback)
+  // Unified send action (WebSocket primary, HTTP POST fallback for Vercel serverless)
   const sendWsAction = async (action: object) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(action));
@@ -216,6 +221,10 @@ export default function App() {
           if (resp && resp.type) {
             handleServerMessage(resp as ServerMessage);
           }
+        }
+        // Immediate sync follow-up
+        if (roomId) {
+          setTimeout(() => fetchRoomStateFallback(roomId), 250);
         }
       } catch {
         setErrorMessage('Failed to send action. Retrying...');
