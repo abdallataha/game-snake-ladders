@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { RoomState, ServerMessage, CardColor, RoundCardScheme } from './types';
+import { RoomState, ServerMessage, CardColor, RoundCardScheme, Player } from './types';
 import { Board } from './components/Board';
 import { CardSelector } from './components/CardSelector';
 import { Leaderboard } from './components/Leaderboard';
@@ -49,6 +49,8 @@ export default function App() {
       setPlayerId(savedPlayerId);
     }
   }, []);
+
+  const prevPlayersRef = useRef<Record<string, Player>>({});
 
   // Handle server message payloads
   const handleServerMessage = useCallback((msg: ServerMessage) => {
@@ -107,7 +109,7 @@ export default function App() {
     }
   }, []);
 
-  // HTTP Fallback to fetch room state
+  // HTTP State synchronization (Vercel Serverless Function & REST primary)
   const fetchRoomStateFallback = useCallback(async (targetRoomId: string) => {
     try {
       const res = await fetch(`/api/room/${targetRoomId}`);
@@ -115,6 +117,37 @@ export default function App() {
         const data = await res.json();
         if (data.state) {
           const state: RoomState = data.state;
+
+          // Detect position changes for players to trigger sound effects in pure HTTP mode
+          const prevPlayers = prevPlayersRef.current;
+          if (prevPlayers && Object.keys(prevPlayers).length > 0) {
+            Object.values(state.players).forEach((p) => {
+              const prev = prevPlayers[p.id];
+              if (prev && prev.position !== p.position) {
+                setActiveMovingPlayerId(p.id);
+                if (p.position > prev.position) {
+                  // Check if climbed ladder
+                  const climbedLadder = p.laddersClimbedCount > prev.laddersClimbedCount;
+                  if (climbedLadder) {
+                    sounds.playLadderClimb();
+                  } else {
+                    sounds.playStep();
+                  }
+                } else if (p.position < prev.position) {
+                  // Bit by snake or bounce back
+                  const hitSnake = p.snakesHitCount > prev.snakesHitCount;
+                  if (hitSnake) {
+                    sounds.playSnakeBite();
+                  } else {
+                    sounds.playStep();
+                  }
+                }
+                setTimeout(() => setActiveMovingPlayerId(null), 1200);
+              }
+            });
+          }
+          prevPlayersRef.current = { ...state.players };
+
           setRoomState(state);
 
           const currentSavedPlayerId = sessionStorage.getItem('sl_player_id');
@@ -130,25 +163,36 @@ export default function App() {
     }
   }, []);
 
-  // Set up polling fallback whenever in room (1s interval for responsive Vercel serverless updates)
+  // Set up high-frequency polling for Vercel Serverless environment
   useEffect(() => {
     if (roomId) {
       // Immediate fetch on mount/room change
       fetchRoomStateFallback(roomId);
 
+      const intervalMs = 750; // Fast 750ms poll for seamless multiplayer sync without WebSockets
       pollIntervalRef.current = setInterval(() => {
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
           fetchRoomStateFallback(roomId);
         }
-      }, 1000);
+      }, intervalMs);
     }
     return () => {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     };
   }, [roomId, fetchRoomStateFallback]);
 
-  // Establish WebSocket connection
+  // Establish WebSocket connection (with graceful degradation for Vercel serverless)
+  const wsAttemptFailedRef = useRef<boolean>(false);
+
   const connectWebSocket = useCallback(() => {
+    // If running on Vercel deployment or WebSocket failed, do not attempt broken WS connections
+    if (
+      typeof window !== 'undefined' &&
+      (window.location.hostname.includes('vercel.app') || wsAttemptFailedRef.current)
+    ) {
+      return;
+    }
+
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
       return;
     }
@@ -183,17 +227,16 @@ export default function App() {
       };
 
       ws.onerror = () => {
-        // Fallback to HTTP polling silently
+        // Mark WS as unavailable and cleanly transition to HTTP REST polling
+        wsAttemptFailedRef.current = true;
       };
 
       ws.onclose = () => {
-        if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = setTimeout(() => {
-          connectWebSocket();
-        }, 5000);
+        // On Vercel, WS closes immediately; don't loop endlessly
+        wsAttemptFailedRef.current = true;
       };
     } catch {
-      // fallback to HTTP polling
+      wsAttemptFailedRef.current = true;
     }
   }, [handleServerMessage]);
 
@@ -205,7 +248,7 @@ export default function App() {
     };
   }, [connectWebSocket]);
 
-  // Unified send action (WebSocket primary, HTTP POST fallback for Vercel serverless)
+  // Unified send action (HTTP REST primary for Vercel Serverless, WebSocket if open)
   const sendWsAction = async (action: object) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(action));
@@ -222,12 +265,14 @@ export default function App() {
             handleServerMessage(resp as ServerMessage);
           }
         }
-        // Immediate sync follow-up
-        if (roomId) {
-          setTimeout(() => fetchRoomStateFallback(roomId), 250);
+        // Immediate rapid sync follow-ups for instant feedback
+        const targetRoom = roomId || (action as { payload?: { roomId?: string } }).payload?.roomId;
+        if (targetRoom) {
+          setTimeout(() => fetchRoomStateFallback(targetRoom), 100);
+          setTimeout(() => fetchRoomStateFallback(targetRoom), 400);
         }
       } catch {
-        setErrorMessage('Failed to send action. Retrying...');
+        setErrorMessage('Connection issue. Retrying action...');
       }
     }
   };
