@@ -5,7 +5,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig(() => {
   return {
-    base: '/game-snake-ladders/', // 👈 Add this line here
+    base: '/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
