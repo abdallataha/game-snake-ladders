@@ -121,7 +121,7 @@ export const DEFAULT_CARD_SCHEMES: RoundCardScheme[] = [
     round: 4,
     title: 'Interactive Round 4 (Question 4 / 5)',
     question: 'What does an improving System Usability Scale (SUS) score over 60 days signify?',
-    correctColor: 'BLUE',
+    correctColor: 'YELLOW',
     cards: {
       RED: {
         color: 'RED',
@@ -153,7 +153,7 @@ export const DEFAULT_CARD_SCHEMES: RoundCardScheme[] = [
     round: 5,
     title: 'Interactive Round 5 (Question 5 / 5)',
     question: 'How did More Stamina empower users beyond raw individual activity tracking?',
-    correctColor: 'BLUE',
+    correctColor: 'GREEN',
     cards: {
       RED: {
         color: 'RED',
